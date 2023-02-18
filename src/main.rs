@@ -28,7 +28,8 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 
-const RADIUS: f32 = 1.0 / 3.0;
+const N: i32 = 20;
+const RADIUS: f32 = 1.0 / 3.0 / N as f32 * 10.;
 const GRAVITY: f32 = -0.00981;
 const PHYSICS_SUB_STEPS: i32 = 8;
 const FPS: i32 = 99;
@@ -138,8 +139,8 @@ fn setup(
         })),
         SpatialBundle::VISIBLE_IDENTITY,
         InstanceMaterialData(
-            (1..=10)
-                .flat_map(|x| (1..=10).map(move |y| (x as f32 / 10.0, y as f32 / 10.0)))
+            (1..=N)
+                .flat_map(|x| (1..=N).map(move |y| (x as f32 / N as f32, y as f32 / N as f32)))
                 .map(|(x, y)| InstanceData {
                     position: Vec3::new(x * 10.0 - 5.0, y * 10.0 - 5.0, 0.0),
                     velocity: Vec3::new(0.01, 0., 0.),
@@ -377,53 +378,3 @@ impl EntityRenderCommand for DrawMeshInstanced {
         RenderCommandResult::Success
     }
 }
-
-// use bevy::prelude::*;
-
-// fn hello_world() {
-//     println!("hello world!");
-// }
-
-// const RADIUS: f32 = 1.0;
-
-// #[derive(Component)]
-// struct CircleCollidable;
-
-// #[derive(Component)]
-// struct Name(String);
-
-// // fn add_circles(mut commands: Commands) {
-// //     commands.spawn((Person, Name("Elaina Proctor".to_string())));
-// //     commands.spawn((Person, Name("Renzo Hume".to_string())));
-// //     commands.spawn((Person, Name("Zayna Nieves".to_string())));
-// // }
-
-// #[derive(Resource)]
-// struct GreetTimer(Timer);
-
-// fn greet_people(time: Res<Time>, mut timer: ResMut<GreetTimer>, query: Query<&Name, With<Person>>) {
-//     // update our timer with the time elapsed since the last update
-//     // if that caused the timer to finish, we say hello to everyone
-//     if timer.0.tick(time.delta()).just_finished() {
-//         for name in query.iter() {
-//             println!("hello {}!", name.0);
-//         }
-//     }
-// }
-
-// pub struct HelloPlugin;
-
-// impl Plugin for HelloPlugin {
-//     fn build(&self, app: &mut App) {
-//         app.insert_resource(GreetTimer(Timer::from_seconds(1.0/60.0, TimerMode::Repeating)))
-//             // .add_startup_system(add_people)
-//             .add_system(add_circles);
-//     }
-// }
-
-// fn main() {
-//     App::new()
-//         .add_plugins(DefaultPlugins)
-//         .add_plugin(HelloPlugin)
-//         .run();
-// }
