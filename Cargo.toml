@@ -7,8 +7,9 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.9.1"
+bytemuck = "1.13.0"
 
-[dev_dependencies]
+[dev-dependencies]
 bevy = { version = "0.9.1", features = ["dynamic"] }
 
 # Enable a small amount of optimization in debug mode
