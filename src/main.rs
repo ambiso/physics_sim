@@ -1,7 +1,7 @@
 #![feature(get_many_mut)]
 //! A shader that renders a mesh multiple times in one draw call.
 
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 use bevy::{
     core_pipeline::core_3d::Transparent3d,
@@ -99,7 +99,8 @@ fn physics_step(mut q: Query<&mut InstanceMaterialData>, mut diagnostics: ResMut
                     instance.velocity.y *= -0.9;
                 }
                 instance.position += instance.velocity;
-                for j in 0..instance_material_data.0.len() {
+
+                for j in instance_material_data.1.neighbors(instance_material_data.0[i].position) {
                     if i != j {
                         let [a, b] = instance_material_data.0.get_many_mut([i, j]).unwrap();
                         solve_collision(a, b);
@@ -107,6 +108,7 @@ fn physics_step(mut q: Query<&mut InstanceMaterialData>, mut diagnostics: ResMut
                 }
             }
         }
+        instance_material_data.1 = SpatialHashGrid::from_instance_data(&instance_material_data.0);
     }
     let ms = tic.elapsed().as_secs_f32() * 1000.;
     diagnostics.add_measurement(PHYSICS_STEPS_MS, || ms as f64);
@@ -138,7 +140,7 @@ fn setup(
             stacks: 18,
         })),
         SpatialBundle::VISIBLE_IDENTITY,
-        InstanceMaterialData(
+        InstanceMaterialData::from_instance_data(
             (1..=N)
                 .flat_map(|x| (1..=N).map(move |y| (x as f32 / N as f32, y as f32 / N as f32)))
                 .map(|(x, y)| InstanceData {
@@ -175,15 +177,80 @@ fn setup(
     });
 }
 
-#[derive(Component, Deref)]
-struct InstanceMaterialData(Vec<InstanceData>);
+#[derive(Clone)]
+pub struct SpatialHashGrid {
+    cells: HashMap<[i32; 3], Vec<usize>>,
+}
+
+impl SpatialHashGrid {
+    pub fn new() -> Self {
+        Self {
+            cells: HashMap::new(),
+        }
+    }
+
+    pub fn from_instance_data(instance_data: &Vec<InstanceData>) -> Self {
+        let mut grid = Self::new();
+        for (i, instance) in instance_data.iter().enumerate() {
+            grid.insert(instance.position, i);
+        }
+        grid
+    }
+
+    pub fn insert(&mut self, position: Vec3, index: usize) {
+        let cell = self.cell(position);
+        self.cells.entry(cell).or_default().push(index);
+    }
+
+    pub fn remove(&mut self, position: Vec3, index: usize) {
+        let cell = self.cell(position);
+        if let Some(indices) = self.cells.get_mut(&cell) {
+            indices.retain(|&i| i != index);
+        }
+    }
+
+    pub fn cell(&self, position: Vec3) -> [i32; 3] {
+        [
+            (position.x / RADIUS).floor() as i32,
+            (position.y / RADIUS).floor() as i32,
+            (position.z / RADIUS).floor() as i32,
+        ]
+    }
+
+    pub fn neighbors(&self, position: Vec3) -> Vec<usize> {
+        let cell = self.cell(position);
+        let mut neighbors = Vec::new();
+        for x in -1..=1 {
+            for y in -1..=1 {
+                for z in -1..=1 {
+                    if let Some(indices) = self.cells.get(&[cell[0] + x, cell[1] + y, cell[2] + z])
+                    {
+                        neighbors.extend_from_slice(indices);
+                    }
+                }
+            }
+        }
+        neighbors
+    }
+}
+
+#[derive(Component)]
+struct InstanceMaterialData(Vec<InstanceData>, SpatialHashGrid);
+
+impl InstanceMaterialData {
+    fn from_instance_data(instance_data: Vec<InstanceData>) -> Self {
+        
+        let grid = SpatialHashGrid::from_instance_data(&instance_data);
+        Self(instance_data, grid)
+    }
+}
 
 impl ExtractComponent for InstanceMaterialData {
     type Query = &'static InstanceMaterialData;
     type Filter = ();
 
     fn extract_component(item: QueryItem<'_, Self::Query>) -> Self {
-        InstanceMaterialData(item.0.clone())
+        InstanceMaterialData(item.0.clone(), item.1.clone())
     }
 }
 
@@ -203,7 +270,7 @@ impl Plugin for CustomMaterialPlugin {
 
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
-struct InstanceData {
+pub struct InstanceData {
     velocity: Vec3,
     position: Vec3,
     scale: f32,
@@ -263,12 +330,12 @@ fn prepare_instance_buffers(
     for (entity, instance_data) in &query {
         let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("instance data buffer"),
-            contents: bytemuck::cast_slice(instance_data.as_slice()),
+            contents: bytemuck::cast_slice(instance_data.0.as_slice()),
             usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
         });
         commands.entity(entity).insert(InstanceBuffer {
             buffer,
-            length: instance_data.len(),
+            length: instance_data.0.len(),
         });
     }
 }
