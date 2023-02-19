@@ -100,7 +100,10 @@ fn physics_step(mut q: Query<&mut InstanceMaterialData>, mut diagnostics: ResMut
                 }
                 instance.position += instance.velocity;
 
-                for j in instance_material_data.1.neighbors(instance_material_data.0[i].position) {
+                for j in instance_material_data
+                    .1
+                    .neighbors(instance_material_data.0[i].position)
+                {
                     if i != j {
                         let [a, b] = instance_material_data.0.get_many_mut([i, j]).unwrap();
                         solve_collision(a, b);
@@ -211,9 +214,9 @@ impl SpatialHashGrid {
 
     pub fn cell(&self, position: Vec3) -> [i32; 3] {
         [
-            (position.x / RADIUS).floor() as i32,
-            (position.y / RADIUS).floor() as i32,
-            (position.z / RADIUS).floor() as i32,
+            (position.x / (2. * RADIUS)).floor() as i32,
+            (position.y / (2. * RADIUS)).floor() as i32,
+            (position.z / (2. * RADIUS)).floor() as i32,
         ]
     }
 
@@ -239,7 +242,6 @@ struct InstanceMaterialData(Vec<InstanceData>, SpatialHashGrid);
 
 impl InstanceMaterialData {
     fn from_instance_data(instance_data: Vec<InstanceData>) -> Self {
-        
         let grid = SpatialHashGrid::from_instance_data(&instance_data);
         Self(instance_data, grid)
     }
