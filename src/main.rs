@@ -1,7 +1,7 @@
 #![feature(get_many_mut)]
 //! A shader that renders a mesh multiple times in one draw call.
 
-use std::{collections::HashMap, time::Instant};
+use std::time::Duration;
 
 use bevy::{
     core_pipeline::core_3d::Transparent3d,
@@ -25,11 +25,14 @@ use bevy::{
         view::{ExtractedView, NoFrustumCulling},
         RenderApp, RenderStage,
     },
+    utils::{HashMap, Instant},
 };
 use bytemuck::{Pod, Zeroable};
 
-const N: i32 = 20;
-const RADIUS: f32 = 1.0 / 3.0 / N as f32 * 10.;
+const RADIUS: f32 = 1.0 / 3.0 / 20.0 as f32 * 10.;
+const EXTENT: f32 = 10.;
+const ROWS: usize = 15;
+const N_ROWS: usize = 200;
 const GRAVITY: f32 = -0.00981;
 const PHYSICS_SUB_STEPS: i32 = 8;
 const FPS: i32 = 99;
@@ -60,25 +63,32 @@ fn solve_collision(i1: &mut InstanceData, i2: &mut InstanceData) {
         let eps = 0.5;
         let j = (1. + eps) * meff * vimp;
 
-        let dv1 = -j * n;
-        let dv2 = j * n;
-
-        i1.velocity += dv1;
-        i2.velocity += dv2;
+        i1.velocity -= j * n;
+        i2.velocity += j * n;
     }
 }
 
-const EXTENT: f32 = 10.;
+#[derive(Resource)]
+struct PhysicsFrameCounter(u64);
 
 const PHYSICS_STEPS_MS: DiagnosticId =
     DiagnosticId::from_u128(305697860378959379917727562126468611595);
 
-fn physics_step(mut q: Query<&mut InstanceMaterialData>, mut diagnostics: ResMut<Diagnostics>) {
+fn physics_step(
+    mut phyics_frame_counter: ResMut<PhysicsFrameCounter>,
+    mut q: Query<&mut InstanceMaterialData>,
+    mut diagnostics: ResMut<Diagnostics>,
+) {
+    let mut elapsed = Duration::ZERO;
     let tic = Instant::now();
     for mut instance_material_data in q.iter_mut() {
+        if phyics_frame_counter.0 > ((instance_material_data.2 / ROWS) * 10) as u64 {
+            instance_material_data.2 =
+                (instance_material_data.2 + ROWS).min(instance_material_data.0.len());
+        }
+        phyics_frame_counter.0 += 1;
         for _ in 0..PHYSICS_SUB_STEPS {
-            // let original = instance_material_data.clone();
-            for i in 0..instance_material_data.0.len() {
+            for i in 0..instance_material_data.0[..instance_material_data.2].len() {
                 let instance = &mut instance_material_data.0[i];
                 instance.velocity += Vec3::new(0., GRAVITY / (PHYSICS_SUB_STEPS * FPS) as f32, 0.);
 
@@ -110,21 +120,25 @@ fn physics_step(mut q: Query<&mut InstanceMaterialData>, mut diagnostics: ResMut
                     }
                 }
             }
+            instance_material_data.1 = SpatialHashGrid::from_instance_data(
+                &instance_material_data.0[..instance_material_data.2],
+            );
         }
-        instance_material_data.1 = SpatialHashGrid::from_instance_data(&instance_material_data.0);
     }
-    let ms = tic.elapsed().as_secs_f32() * 1000.;
+    elapsed += tic.elapsed();
+    let ms = elapsed.as_secs_f32() * 1000.;
     diagnostics.add_measurement(PHYSICS_STEPS_MS, || ms as f64);
 }
 
-use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
-
+// use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::diagnostic::LogDiagnosticsPlugin;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        // .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(CustomMaterialPlugin)
+        .insert_resource(PhysicsFrameCounter(0))
         .add_system(physics_step)
         .add_startup_system(setup)
         .run();
@@ -144,13 +158,15 @@ fn setup(
         })),
         SpatialBundle::VISIBLE_IDENTITY,
         InstanceMaterialData::from_instance_data(
-            (1..=N)
-                .flat_map(|x| (1..=N).map(move |y| (x as f32 / N as f32, y as f32 / N as f32)))
-                .map(|(x, y)| InstanceData {
+            (1..=N_ROWS)
+                .flat_map(|_x| (1..=ROWS).map(move |y| (0.0, y as f32 / ROWS as f32)))
+                .enumerate()
+                .map(|(i, (x, y))| InstanceData {
                     position: Vec3::new(x * 10.0 - 5.0, y * 10.0 - 5.0, 0.0),
                     velocity: Vec3::new(0.01, 0., 0.),
                     scale: 1.0,
-                    color: Color::hsla(x * 360., y, 0.5, 1.0).as_rgba_f32(),
+                    color: Color::hsla((i as f32) / (N_ROWS * ROWS) as f32 * 360., 1.0, 0.5, 1.0)
+                        .as_rgba_f32(),
                 })
                 .collect(),
         ),
@@ -188,11 +204,11 @@ pub struct SpatialHashGrid {
 impl SpatialHashGrid {
     pub fn new() -> Self {
         Self {
-            cells: HashMap::new(),
+            cells: HashMap::default(),
         }
     }
 
-    pub fn from_instance_data(instance_data: &Vec<InstanceData>) -> Self {
+    pub fn from_instance_data(instance_data: &[InstanceData]) -> Self {
         let mut grid = Self::new();
         for (i, instance) in instance_data.iter().enumerate() {
             grid.insert(instance.position, i);
@@ -209,6 +225,17 @@ impl SpatialHashGrid {
         let cell = self.cell(position);
         if let Some(indices) = self.cells.get_mut(&cell) {
             indices.retain(|&i| i != index);
+        }
+    }
+
+    pub fn moved(&mut self, prev: Vec3, cur: Vec3, index: usize) {
+        let prev_cell = self.cell(prev);
+        let cell = self.cell(cur);
+        if prev_cell != cell {
+            if let Some(indices) = self.cells.get_mut(&prev_cell) {
+                indices.retain(|&i| i != index);
+            }
+            self.cells.entry(cell).or_default().push(index);
         }
     }
 
@@ -238,12 +265,12 @@ impl SpatialHashGrid {
 }
 
 #[derive(Component)]
-struct InstanceMaterialData(Vec<InstanceData>, SpatialHashGrid);
+struct InstanceMaterialData(Vec<InstanceData>, SpatialHashGrid, usize);
 
 impl InstanceMaterialData {
     fn from_instance_data(instance_data: Vec<InstanceData>) -> Self {
         let grid = SpatialHashGrid::from_instance_data(&instance_data);
-        Self(instance_data, grid)
+        Self(instance_data, grid, 0)
     }
 }
 
@@ -252,7 +279,7 @@ impl ExtractComponent for InstanceMaterialData {
     type Filter = ();
 
     fn extract_component(item: QueryItem<'_, Self::Query>) -> Self {
-        InstanceMaterialData(item.0.clone(), item.1.clone())
+        InstanceMaterialData(item.0.clone(), item.1.clone(), item.2)
     }
 }
 
@@ -330,14 +357,15 @@ fn prepare_instance_buffers(
     render_device: Res<RenderDevice>,
 ) {
     for (entity, instance_data) in &query {
+        let slice = &instance_data.0[..instance_data.2];
         let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("instance data buffer"),
-            contents: bytemuck::cast_slice(instance_data.0.as_slice()),
+            contents: bytemuck::cast_slice(slice),
             usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
         });
         commands.entity(entity).insert(InstanceBuffer {
             buffer,
-            length: instance_data.0.len(),
+            length: slice.len(),
         });
     }
 }
