@@ -82,7 +82,7 @@ fn physics_step(
     let mut elapsed = Duration::ZERO;
     let tic = Instant::now();
     for mut instance_material_data in q.iter_mut() {
-        if phyics_frame_counter.0 > ((instance_material_data.2 / ROWS) * 10) as u64 {
+        if phyics_frame_counter.0 > ((instance_material_data.2 / ROWS) * 3) as u64 {
             instance_material_data.2 =
                 (instance_material_data.2 + ROWS).min(instance_material_data.0.len());
         }
@@ -162,8 +162,8 @@ fn setup(
                 .flat_map(|_x| (1..=ROWS).map(move |y| (0.0, y as f32 / ROWS as f32)))
                 .enumerate()
                 .map(|(i, (x, y))| InstanceData {
-                    position: Vec3::new(x * 10.0 - 5.0, y * 10.0 - 5.0, 0.0),
-                    velocity: Vec3::new(0.01, 0., 0.),
+                    position: Vec3::new(x * 10.0 - 7.0, y * 10.0 - 5.0 + 3.0, 0.0),
+                    velocity: Vec3::new(0.02, 0., 0.),
                     scale: 1.0,
                     color: Color::hsla((i as f32) / (N_ROWS * ROWS) as f32 * 360., 1.0, 0.5, 1.0)
                         .as_rgba_f32(),
